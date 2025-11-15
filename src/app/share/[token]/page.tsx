@@ -25,7 +25,7 @@ type Schedule = {
   end_time: string | null;
   title: string;
   location: string | null;
-  memo: string | null;
+  note: string | null;
 };
 
 // タスク（ステータスは string にしておくと楽）
@@ -267,11 +267,11 @@ export default function ShareTripPage() {
                       <div className="text-sm font-medium text-slate-800">
                         {s.title}
                       </div>
-                      {(s.location || s.memo) && (
+                      {(s.location || s.note) && (
                         <p className="text-[11px] text-slate-500">
                           {s.location && <span>{s.location}</span>}
-                          {s.location && s.memo && <span> ｜ </span>}
-                          {s.memo && <span>{s.memo}</span>}
+                          {s.location && s.note && <span> ｜ </span>}
+                          {s.note && <span>{s.note}</span>}
                         </p>
                       )}
                     </div>
