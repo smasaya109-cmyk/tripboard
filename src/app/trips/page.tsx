@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/Button';
@@ -14,14 +14,16 @@ type Trip = {
   start_date: string | null;
   end_date: string | null;
   description: string | null;
+  share_token: string | null;
+  is_share_public: boolean;
 };
 
 export default function TripsPage() {
   const router = useRouter();
 
+  const [deviceId, setDeviceId] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(true);
-  const [userId, setUserId] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [error, setError] = useState<string | null>(null);
 
@@ -32,56 +34,60 @@ export default function TripsPage() {
   const [newDescription, setNewDescription] = useState('');
   const [creating, setCreating] = useState(false);
 
+  // 共有リンクコピー用
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const [copyingTripId, setCopyingTripId] = useState<string | null>(null);
+
   // 初期ロード：ユーザー確認＆旅行一覧取得
   useEffect(() => {
-    const init = async () => {
-      setLoading(true);
-      setError(null);
+  const init = async () => {
+    setLoading(true);
+    setError(null);
 
-      const { data, error } = await supabase.auth.getUser();
+    // ① このブラウザ専用の deviceId を用意
+    let storedId =
+      typeof window !== 'undefined'
+        ? window.localStorage.getItem('tripboard_device_id')
+        : null;
 
-      if (error || !data.user) {
-        router.push('/login');
-        return;
-      }
+    if (!storedId && typeof window !== 'undefined') {
+      storedId = crypto.randomUUID();
+      window.localStorage.setItem('tripboard_device_id', storedId);
+    }
 
-      const user = data.user;
-      setUserId(user.id);
-      setUserEmail(user.email ?? null);
-
-      // プロフィール upsert（存在しなければ作成＆emailを保存）
-        await supabase.from('profiles').upsert(
-          {
-            id: user.id,
-            email: user.email, // 追加
-          },
-          { onConflict: 'id' }
-        );
-
-
-      // 自分が owner の旅行一覧を取得
-      const { data: tripsData, error: tripsError } = await supabase
-        .from('trips')
-        .select('*')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false });
-
-      if (tripsError) {
-        console.error(tripsError);
-        setError('旅行一覧の取得に失敗しました');
-      } else {
-        setTrips((tripsData ?? []) as Trip[]);
-      }
-
+    if (!storedId) {
+      // ありえないけど一応
+      setError('端末IDの取得に失敗しました');
       setLoading(false);
-    };
+      return;
+    }
 
-    init();
-  }, [router]);
+    setDeviceId(storedId);
 
-  const handleCreateTrip = async (e: React.FormEvent) => {
+    // ② この deviceId が owner_id の旅行だけ取得
+    const { data: tripsData, error: tripsError } = await supabase
+      .from('trips')
+      .select('*')
+      .eq('owner_id', storedId)
+      .order('created_at', { ascending: false });
+
+    if (tripsError) {
+      console.error(tripsError);
+      setError('旅行一覧の取得に失敗しました');
+    } else {
+      setTrips((tripsData ?? []) as Trip[]);
+    }
+
+    setLoading(false);
+  };
+
+  init();
+}, [router]);
+
+
+  const handleCreateTrip = async (e: FormEvent) => {
     e.preventDefault();
-    if (!userId) return;
+    if (!deviceId) return; 
     if (!newTitle.trim()) {
       setError('タイトルは必須です');
       return;
@@ -91,29 +97,22 @@ export default function TripsPage() {
     setError(null);
 
     try {
-      // trips に挿入
+      // trips に挿入（share_token / is_share_public はDBのデフォルトに任せる想定）
       const { data, error } = await supabase
         .from('trips')
         .insert({
-          owner_id: userId,
+          owner_id: deviceId,  
           title: newTitle.trim(),
           start_date: newStartDate || null,
           end_date: newEndDate || null,
           description: newDescription || null,
         })
-        .select()
+        .select('id, owner_id, title, start_date, end_date, description, share_token, is_share_public')
         .single();
 
       if (error) throw error;
 
       const newTrip = data as Trip;
-
-      // trip_members に owner として登録
-      await supabase.from('trip_members').insert({
-        trip_id: newTrip.id,
-        user_id: userId,
-        role: 'owner',
-      });
 
       // state に反映
       setTrips((prev) => [newTrip, ...prev]);
@@ -131,14 +130,37 @@ export default function TripsPage() {
     }
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    router.push('/login');
+  
+
+  const formatDateRange = (trip: Trip) => {
+    if (trip.start_date && trip.end_date) {
+      return `${trip.start_date} 〜 ${trip.end_date}`;
+    }
+    return '日程未設定';
+  };
+
+  const handleCopyShareLink = async (trip: Trip) => {
+    if (!trip.share_token) return;
+    try {
+      setCopyingTripId(trip.id);
+      const origin =
+        typeof window !== 'undefined' ? window.location.origin : '';
+      const url = `${origin}/share/${trip.share_token}`;
+      await navigator.clipboard.writeText(url);
+      setCopyMessage('共有リンクをコピーしました');
+      setTimeout(() => setCopyMessage(null), 2000);
+    } catch (err) {
+      console.error(err);
+      setCopyMessage('コピーに失敗しました');
+      setTimeout(() => setCopyMessage(null), 2000);
+    } finally {
+      setCopyingTripId(null);
+    }
   };
 
   if (loading) {
-  return <LoadingScreen message="旅行一覧を読み込み中です…" />;
-}
+    return <LoadingScreen message="旅行一覧を読み込み中です…" />;
+  }
 
   return (
     <main className="min-h-screen bg-slate-100">
@@ -149,12 +171,9 @@ export default function TripsPage() {
             旅行一覧
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            ログイン中: {userEmail}
+            ログイン不要で使えます
           </p>
         </div>
-        <Button variant="ghost" size="sm" onClick={handleLogout}>
-          ログアウト
-        </Button>
       </header>
 
       {/* コンテンツ */}
@@ -244,25 +263,56 @@ export default function TripsPage() {
               {trips.map((trip) => (
                 <Card
                   key={trip.id}
-                  className="px-4 py-3 flex items-center justify-between hover:bg-slate-50 cursor-pointer transition-colors"
+                  className="px-4 py-3 flex items-center justify-between gap-4 hover:bg-slate-50 cursor-pointer transition-colors"
                   onClick={() => router.push(`/trips/${trip.id}`)}
                 >
-                  <div>
+                  <div className="flex-1">
                     <div className="text-sm font-medium text-slate-900">
                       {trip.title}
                     </div>
                     <div className="text-xs text-slate-500 mt-1">
-                      {trip.start_date && trip.end_date
-                        ? `${trip.start_date} 〜 ${trip.end_date}`
-                        : '日程未設定'}
+                      {formatDateRange(trip)}
+                    </div>
+
+                    {/* 共有ステータス */}
+                    <div className="flex items-center gap-2 mt-2">
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2 py-[2px] text-[11px] ${
+                          trip.is_share_public
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                            : 'border-slate-200 bg-slate-50 text-slate-500'
+                        }`}
+                      >
+                        {trip.is_share_public ? '共有オン（URLあり）' : '共有オフ'}
+                      </span>
+                      {trip.is_share_public && trip.share_token && (
+                        <button
+                          type="button"
+                          className="text-[11px] text-blue-600 hover:underline"
+                          onClick={(e) => {
+                            e.stopPropagation(); // カード遷移を止める
+                            handleCopyShareLink(trip);
+                          }}
+                          disabled={copyingTripId === trip.id}
+                        >
+                          {copyingTripId === trip.id
+                            ? 'コピー中…'
+                            : '共有リンクをコピー'}
+                        </button>
+                      )}
                     </div>
                   </div>
-                  <span className="text-[11px] text-slate-400">
+
+                  <span className="text-[11px] text-slate-400 whitespace-nowrap">
                     詳細を開く
                   </span>
                 </Card>
               ))}
             </div>
+          )}
+
+          {copyMessage && (
+            <p className="mt-2 text-[11px] text-slate-500">{copyMessage}</p>
           )}
         </section>
       </div>

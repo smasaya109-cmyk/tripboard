@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabaseClient';
 import { Card } from '@/components/ui/Card';
@@ -18,7 +18,7 @@ type Expense = {
   title: string;
   amount: number;
   payer_name: string;
-  participant_names: string[];
+  participant_names: string[] | null;
   memo: string | null;
   created_at: string;
 };
@@ -69,19 +69,15 @@ export default function TripExpensesPage() {
     null
   );
 
+  // ラベル共通関数
+  const memberLabel = (m: MemberRow): string =>
+    m.display_name || m.profiles?.email || 'メンバー';
 
   // ----------------- 初期ロード -----------------
   useEffect(() => {
     const load = async () => {
       setLoading(true);
       setError(null);
-
-      // ログインチェック
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        router.push('/login');
-        return;
-      }
 
       // 旅行タイトルだけ取得
       const { data: tripData, error: tripError } = await supabase
@@ -117,7 +113,8 @@ export default function TripExpensesPage() {
         }));
         setExpenses(list);
       }
-       // メンバー一覧
+
+      // メンバー一覧
       const { data: membersData, error: membersError } = await supabase
         .from('trip_members')
         .select('user_id, display_name, profiles(email)')
@@ -126,7 +123,6 @@ export default function TripExpensesPage() {
 
       if (membersError) {
         console.error(membersError);
-        // エラーは致命的ではないので、エラーメッセージは表示にだけ使う
         setError('メンバー情報の取得に失敗しました');
         setMembers([]);
       } else {
@@ -139,10 +135,10 @@ export default function TripExpensesPage() {
     if (tripId) {
       load();
     }
-  }, [router, tripId]);
+  }, [tripId]);
 
-//-------入力間違えの削除機能--------
-    const handleDeleteExpense = async (expenseId: string) => {
+  // -------入力間違えの削除機能--------
+  const handleDeleteExpense = async (expenseId: string) => {
     if (!window.confirm('この支出を削除しますか？')) return;
 
     setError(null);
@@ -165,9 +161,8 @@ export default function TripExpensesPage() {
     }
   };
 
-
   // ----------------- 支出追加 -----------------
-  const handleAddExpense = async (e: React.FormEvent) => {
+  const handleAddExpense = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -224,19 +219,15 @@ export default function TripExpensesPage() {
       setCreating(false);
     }
   };
-            //ヘルパー関数
-    const toggleParticipant = (name: string) => {
+
+  // ヘルパー：参加者トグル
+  const toggleParticipant = (name: string) => {
     setSelectedParticipants((prev) =>
       prev.includes(name)
         ? prev.filter((n) => n !== name)
         : [...prev, name]
     );
   };
-
-  const memberLabel = (m: MemberRow): string =>
-    m.display_name || m.profiles?.email || 'メンバー';
-
-
 
   // ----------------- 集計ロジック -----------------
   const summaries: PersonSummary[] = useMemo(() => {
@@ -329,8 +320,8 @@ export default function TripExpensesPage() {
 
   // ----------------- レンダリング -----------------
   if (loading) {
-  return <LoadingScreen message="読み込み中…" />;
-}
+    return <LoadingScreen message="読み込み中…" />;
+  }
 
   if (!trip) {
     return (
@@ -403,7 +394,7 @@ export default function TripExpensesPage() {
                 </div>
               </div>
 
-                            {/* 支払った人＆参加者（メンバーから選択） */}
+              {/* 支払った人＆参加者（メンバーから選択） */}
               <div className="space-y-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
@@ -473,7 +464,6 @@ export default function TripExpensesPage() {
                 </div>
               </div>
 
-
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
                   メモ
@@ -487,7 +477,17 @@ export default function TripExpensesPage() {
                 />
               </div>
 
-              <Button type="submit" size="sm" disabled={creating}>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={
+                  creating ||
+                  !title.trim() ||
+                  !amount.trim() ||
+                  !selectedPayer ||
+                  members.length === 0
+                }
+              >
                 {creating ? '追加中...' : '支出を追加'}
               </Button>
             </form>
@@ -531,7 +531,9 @@ export default function TripExpensesPage() {
                       <span>支払：{exp.payer_name}</span>
                       <span>
                         参加者：
-                        {exp.participant_names.join(', ')}
+                        {exp.participant_names && exp.participant_names.length > 0
+                          ? exp.participant_names.join(', ')
+                          : '未設定'}
                       </span>
                     </div>
                     {exp.memo && (
@@ -544,7 +546,6 @@ export default function TripExpensesPage() {
               </ul>
             )}
           </section>
-
 
           {/* 人ごとの集計 */}
           <section className="space-y-2 pt-4 border-t border-slate-200">
@@ -598,57 +599,57 @@ export default function TripExpensesPage() {
           </section>
 
           {/* 最終的な精算案 */}
-            <section className="mt-8 space-y-3">
-              <h2 className="text-base font-semibold text-slate-900">最終的な精算案</h2>
-              <p className="text-xs text-slate-500">
-                この一覧のとおりにお金を動かせば、全員の支払いがきれいにチャラになります。
-              </p>
+          <section className="mt-8 space-y-3">
+            <h2 className="text-base font-semibold text-slate-900">最終的な精算案</h2>
+            <p className="text-xs text-slate-500">
+              この一覧のとおりにお金を動かせば、全員の支払いがきれいにチャラになります。
+            </p>
 
-              <div className="space-y-3">
-                {settlements.length === 0 ? (
-                  <p className="text-xs text-slate-500">
-                    いまのところ精算が必要な差額はありません。
-                  </p>
-                ) : (
-                  settlements.map((s, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded-2xl border border-slate-100 bg-white/90 px-4 py-3 shadow-[0_18px_45px_rgba(15,23,42,0.08)] flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      {/* 左側：誰 → 誰 に払うか */}
-                      <div className="flex items-center gap-3">
-                        <div className="flex flex-col">
-                          <span className="text-[11px] text-slate-500">支払う人</span>
-                          <span className="text-sm font-semibold text-slate-900 break-all">
-                            {s.from}
-                          </span>
-                        </div>
-
-                        {/* 矢印 */}
-                        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-400 text-base">
-                          →
-                        </div>
-
-                        <div className="flex flex-col">
-                          <span className="text-[11px] text-slate-500">受け取る人</span>
-                          <span className="text-sm font-semibold text-slate-900 break-all">
-                            {s.to}
-                          </span>
-                        </div>
+            <div className="space-y-3">
+              {settlements.length === 0 ? (
+                <p className="text-xs text-slate-500">
+                  いまのところ精算が必要な差額はありません。
+                </p>
+              ) : (
+                settlements.map((s, idx) => (
+                  <div
+                    key={idx}
+                    className="rounded-2xl border border-slate-100 bg-white/90 px-4 py-3 shadow-[0_18px_45px_rgba(15,23,42,0.08)] flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    {/* 左側：誰 → 誰 に払うか */}
+                    <div className="flex items-center gap-3">
+                      <div className="flex flex-col">
+                        <span className="text-[11px] text-slate-500">支払う人</span>
+                        <span className="text-sm font-semibold text-slate-900 break-all">
+                          {s.from}
+                        </span>
                       </div>
 
-                      {/* 右側：金額 */}
-                      <div className="flex items-end justify-between gap-2 sm:flex-col sm:items-end">
-                        <span className="text-[11px] text-slate-500">支払う金額</span>
-                        <span className="text-base font-semibold text-emerald-600 tabular-nums">
-                          ¥{s.amount.toLocaleString()}
+                      {/* 矢印 */}
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-slate-400 text-base">
+                        →
+                      </div>
+
+                      <div className="flex flex-col">
+                        <span className="text-[11px] text-slate-500">受け取る人</span>
+                        <span className="text-sm font-semibold text-slate-900 break-all">
+                          {s.to}
                         </span>
                       </div>
                     </div>
-                  ))
-                )}
-              </div>
-            </section>
+
+                    {/* 右側：金額 */}
+                    <div className="flex items-end justify-between gap-2 sm:flex-col sm:items-end">
+                      <span className="text-[11px] text-slate-500">支払う金額</span>
+                      <span className="text-base font-semibold text-emerald-600 tabular-nums">
+                        ¥{s.amount.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
         </Card>
       </div>
     </main>

@@ -5,9 +5,6 @@
 /* お好みで追加している CSS はこの下に書く */
 @import "tailwindcss";
 
-
-
-
 :root {
   --background: #ffffff;
   --foreground: #171717;

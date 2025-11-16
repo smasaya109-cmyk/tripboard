@@ -6,8 +6,7 @@ import { supabase } from '@/lib/supabaseClient';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import Link from 'next/link';
-import { Spinner } from '@/components/ui/Spinner';
-import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { LoadingScreen } from '@/components/ui/LoadingScreen';
 
 type Trip = {
   id: string;
@@ -52,18 +51,15 @@ type Note = {
   created_at: string;
 };
 
+// ★ シンプルに「名前だけ」のメンバー
 type MemberRow = {
   id: string;
-  user_id: string | null;
   role: string | null;
   display_name: string | null;
-  profiles: {
-    email?: string | null;
-  } | null;
 };
 
 const memberLabel = (m: MemberRow): string =>
-  m.display_name || m.profiles?.email || 'メンバー';
+  m.display_name || 'メンバー';
 
 type TabKey = 'overview' | 'schedule' | 'tasks' | 'notes' | 'members';
 
@@ -73,8 +69,6 @@ export default function TripDetailPage() {
   const tripId = params.tripId as string;
 
   const [loading, setLoading] = useState(true);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
   const [trip, setTrip] = useState<Trip | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>('overview');
@@ -84,7 +78,7 @@ export default function TripDetailPage() {
   const [overviewDraft, setOverviewDraft] = useState('');
   const [savingOverview, setSavingOverview] = useState(false);
 
-  // タイトル編集用
+  // タイトル編集
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
   const [savingTitle, setSavingTitle] = useState(false);
@@ -97,6 +91,7 @@ export default function TripDetailPage() {
   const [newLocation, setNewLocation] = useState('');
   const [newScheduleNote, setNewScheduleNote] = useState('');
   const [creatingSchedule, setCreatingSchedule] = useState(false);
+  const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
 
   // タスク
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -105,24 +100,19 @@ export default function TripDetailPage() {
   const [creatingTask, setCreatingTask] = useState(false);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
   const [updatingAssigneeId, setUpdatingAssigneeId] = useState<string | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
   // メモ
   const [notes, setNotes] = useState<Note[]>([]);
   const [newNote, setNewNote] = useState('');
   const [creatingNote, setCreatingNote] = useState(false);
+  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
 
   // メンバー
   const [members, setMembers] = useState<MemberRow[]>([]);
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviting, setInviting] = useState(false);
   const [newMemberName, setNewMemberName] = useState('');
   const [addingNameMember, setAddingNameMember] = useState(false);
   const [deletingMemberId, setDeletingMemberId] = useState<string | null>(null);
-
-  // 削除中フラグ
-  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
-  const [deletingScheduleId, setDeletingScheduleId] = useState<string | null>(null);
-  const [deletingNoteId, setDeletingNoteId] = useState<string | null>(null);
 
   // 共有リンク
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
@@ -132,16 +122,6 @@ export default function TripDetailPage() {
     const init = async () => {
       setLoading(true);
       setError(null);
-
-      // ユーザー取得
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (userError || !userData.user) {
-        router.push('/login');
-        return;
-      }
-
-      setUserEmail(userData.user.email ?? null);
-      setUserId(userData.user.id);
 
       // 旅行本体
       const { data: tripData, error: tripError } = await supabase
@@ -159,6 +139,7 @@ export default function TripDetailPage() {
 
       setTrip(tripData as Trip);
       setOverviewDraft(tripData.description ?? '');
+      setTitleDraft(tripData.title ?? '');
 
       // 日程
       const { data: scheduleData, error: scheduleError } = await supabase
@@ -207,10 +188,10 @@ export default function TripDetailPage() {
         setNotes((notesData ?? []) as Note[]);
       }
 
-      // メンバー（email だけ参照）
+      // メンバー（名前だけ）
       const { data: membersData, error: membersError } = await supabase
         .from('trip_members')
-        .select('id, user_id, role, display_name, profiles(email)')
+        .select('id, role, display_name')
         .eq('trip_id', tripId)
         .order('created_at', { ascending: true });
 
@@ -227,7 +208,7 @@ export default function TripDetailPage() {
     if (tripId) {
       init();
     }
-  }, [router, tripId]);
+  }, [tripId]);
 
   // ----------------- 概要 -----------------
   const handleSaveOverview = async (e: FormEvent) => {
@@ -247,7 +228,9 @@ export default function TripDetailPage() {
 
       if (error) throw error;
 
-      setTrip(prev => (prev ? { ...prev, description: data.description } : prev));
+      setTrip(prev =>
+        prev ? { ...prev, description: data.description } : prev
+      );
       setOverviewEditing(false);
     } catch (err: any) {
       console.error(err);
@@ -257,7 +240,7 @@ export default function TripDetailPage() {
     }
   };
 
-    const handleSaveTitle = async (e: FormEvent) => {
+  const handleSaveTitle = async (e: FormEvent) => {
     e.preventDefault();
     if (!trip) return;
 
@@ -291,7 +274,7 @@ export default function TripDetailPage() {
   };
 
   // ----------------- 日程 -----------------
-  const handleAddSchedule = async (e: React.FormEvent) => {
+  const handleAddSchedule = async (e: FormEvent) => {
     e.preventDefault();
     if (!trip) return;
 
@@ -327,6 +310,7 @@ export default function TripDetailPage() {
       setNewStartTime('');
       setNewLocation('');
       setNewScheduleNote('');
+      setNewDate('');
     } catch (err: any) {
       console.error(err);
       setError(err.message ?? '日程の追加に失敗しました');
@@ -359,10 +343,10 @@ export default function TripDetailPage() {
   };
 
   // ----------------- タスク -----------------
-  const nextStatus = (current: TaskStatus): TaskStatus =>
-    current === 'done' ? 'todo' : 'done';
+  const toggleStatus = (status: TaskStatus): TaskStatus =>
+    status === 'done' ? 'todo' : 'done';
 
-  const handleAddTask = async (e: React.FormEvent) => {
+  const handleAddTask = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -407,48 +391,38 @@ export default function TripDetailPage() {
     }
   };
 
-  const toggleStatus = (status: TaskStatus): TaskStatus =>
-  status === 'done' ? 'todo' : 'done';
+  // 楽観的更新でステータス変更
+  const handleToggleTaskStatus = async (task: Task) => {
+    setError(null);
 
-// ★ 修正版：先にUIを更新 → そのあとSupabaseへ保存
-const handleToggleTaskStatus = async (task: Task) => {
-  setError(null);
+    const prevStatus = task.status;
+    const newStatus = toggleStatus(task.status);
 
-  const prevStatus = task.status;
-  const newStatus = toggleStatus(task.status);
-
-  // ✅ 楽観的更新：まず画面だけサクッと更新
-  setTasks((prev) =>
-    prev.map((t) =>
-      t.id === task.id ? { ...t, status: newStatus } : t
-    )
-  );
-
-  setUpdatingTaskId(task.id);
-
-  try {
-    const { error } = await supabase
-      .from('tasks')
-      .update({ status: newStatus })
-      .eq('id', task.id);
-
-    if (error) throw error;
-  } catch (err: any) {
-    console.error(err);
-
-    // ❌ 失敗したら元に戻す
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === task.id ? { ...t, status: prevStatus } : t
-      )
+    setTasks(prev =>
+      prev.map(t => (t.id === task.id ? { ...t, status: newStatus } : t))
     );
 
-    setError(err.message ?? 'タスクの更新に失敗しました');
-  } finally {
-    setUpdatingTaskId(null);
-  }
-};
+    setUpdatingTaskId(task.id);
 
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .update({ status: newStatus })
+        .eq('id', task.id);
+
+      if (error) throw error;
+    } catch (err: any) {
+      console.error(err);
+
+      setTasks(prev =>
+        prev.map(t => (t.id === task.id ? { ...t, status: prevStatus } : t))
+      );
+
+      setError(err.message ?? 'タスクの更新に失敗しました');
+    } finally {
+      setUpdatingTaskId(null);
+    }
+  };
 
   const handleChangeTaskAssignee = async (task: Task, assigneeName: string) => {
     setUpdatingAssigneeId(task.id);
@@ -503,7 +477,7 @@ const handleToggleTaskStatus = async (task: Task) => {
   };
 
   // ----------------- メモ -----------------
-  const handleAddNote = async (e: React.FormEvent) => {
+  const handleAddNote = async (e: FormEvent) => {
     e.preventDefault();
     if (!trip) return;
 
@@ -560,17 +534,11 @@ const handleToggleTaskStatus = async (task: Task) => {
     }
   };
 
-  // ----------------- メンバー：削除 -----------------
+  // ----------------- メンバー -----------------
   const handleDeleteMember = async (member: MemberRow) => {
     if (!trip) return;
 
-    if (member.role === 'owner') {
-      setError('オーナーは削除できません');
-      return;
-    }
-
-    const displayName =
-      member.display_name || member.profiles?.email || 'このメンバー';
+    const displayName = member.display_name || 'このメンバー';
 
     if (!window.confirm(`${displayName} をメンバーから削除しますか？`)) {
       return;
@@ -596,8 +564,7 @@ const handleToggleTaskStatus = async (task: Task) => {
     }
   };
 
-  // ----------------- メンバー：名前だけ追加 -----------------
-  const handleAddMemberName = async (e: React.FormEvent) => {
+  const handleAddMemberName = async (e: FormEvent) => {
     e.preventDefault();
     if (!trip) return;
 
@@ -616,7 +583,7 @@ const handleToggleTaskStatus = async (task: Task) => {
           role: 'viewer',
           display_name: name,
         })
-        .select('id, user_id, role, display_name, profiles(email)')
+        .select('id, role, display_name')
         .single();
 
       if (error) throw error;
@@ -629,58 +596,6 @@ const handleToggleTaskStatus = async (task: Task) => {
       setError(err.message ?? 'メンバーの追加に失敗しました');
     } finally {
       setAddingNameMember(false);
-    }
-  };
-
-  // ----------------- メンバー：メールで既存ユーザー招待 -----------------
-  const handleInviteMember = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!trip) return;
-
-    const email = inviteEmail.trim();
-    if (!email) return;
-
-    setInviting(true);
-    setError(null);
-
-    try {
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('id, email')
-        .eq('email', email)
-        .single();
-
-      if (profileError || !profile) {
-        setError(
-          'このメールアドレスのユーザーが見つかりませんでした。相手にアカウント登録をお願いしてください。'
-        );
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('trip_members')
-        .insert({
-          trip_id: trip.id,
-          user_id: (profile as any).id,
-          role: 'member',
-          display_name: (profile as any).email,
-        })
-        .select('id, user_id, role, display_name, profiles(email)')
-        .single();
-
-      if (error) throw error;
-
-      const newMember = data as MemberRow;
-      setMembers(prev => [...prev, newMember]);
-      setInviteEmail('');
-    } catch (err: any) {
-      console.error(err);
-      setError(
-        err?.message ??
-          'メンバーの追加に失敗しました。メールアドレスを確認してください。'
-      );
-    } finally {
-      setInviting(false);
     }
   };
 
@@ -755,8 +670,6 @@ const handleToggleTaskStatus = async (task: Task) => {
     return <LoadingScreen message="読み込み中…" />;
   }
 
-  if (!trip) return null;
-
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-slate-200 dark:from-slate-950 dark:via-slate-900 dark:to-slate-900">
       <header className="sticky top-0 z-20 flex items-center justify-between px-6 py-4 bg-white/80 backdrop-blur-xl border-b border-slate-200/80">
@@ -769,9 +682,6 @@ const handleToggleTaskStatus = async (task: Task) => {
           >
             ← 旅行一覧
           </Button>
-        </div>
-        <div className="text-[11px] text-slate-500 whitespace-nowrap">
-          ログイン中: {userEmail}
         </div>
       </header>
 
@@ -802,62 +712,61 @@ const handleToggleTaskStatus = async (task: Task) => {
           </div>
         </nav>
 
-       {/* タブ内容 */}
-          <Card className="p-6 min-h-[220px]">
+        {/* タブ内容 */}
+        <Card className="p-6 min-h-[220px]">
           {/* 概要タブ */}
-           {/* 概要 */}
-            {activeTab === 'overview' && (
-              <div className="space-y-6">
-                {/* ★ 旅行タイトル + 日程（タイトル編集可） */}
-                <section className="space-y-2">
-                  {titleEditing ? (
-                    <form
-                      onSubmit={handleSaveTitle}
-                      className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
-                    >
-                      <input
-                        className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm sm:text-base outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                        value={titleDraft}
-                        onChange={(e) => setTitleDraft(e.target.value)}
-                        placeholder="旅行のタイトルを入力"
-                      />
-                      <div className="flex gap-2 justify-end sm:justify-start">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setTitleEditing(false)}
-                          disabled={savingTitle}
-                        >
-                          キャンセル
-                        </Button>
-                        <Button type="submit" size="sm" disabled={savingTitle}>
-                          {savingTitle ? '保存中…' : '保存'}
-                        </Button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div className="flex items-center justify-between gap-3">
-                      <h1 className="text-lg sm:text-xl font-semibold text-slate-900">
-                        {trip.title}
-                      </h1>
+          {activeTab === 'overview' && (
+            <div className="space-y-6">
+              {/* タイトル + 日程（編集可） */}
+              <section className="space-y-2">
+                {titleEditing ? (
+                  <form
+                    onSubmit={handleSaveTitle}
+                    className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3"
+                  >
+                    <input
+                      className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm sm:text-base outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      value={titleDraft}
+                      onChange={(e) => setTitleDraft(e.target.value)}
+                      placeholder="旅行のタイトルを入力"
+                    />
+                    <div className="flex gap-2 justify-end sm:justify-start">
                       <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => {
-                          setTitleDraft(trip.title);
-                          setTitleEditing(true);
-                        }}
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setTitleEditing(false)}
+                        disabled={savingTitle}
                       >
-                        タイトルを編集
+                        キャンセル
+                      </Button>
+                      <Button type="submit" size="sm" disabled={savingTitle}>
+                        {savingTitle ? '保存中…' : '保存'}
                       </Button>
                     </div>
-                  )}
+                  </form>
+                ) : (
+                  <div className="flex items-center justify-between gap-3">
+                    <h1 className="text-lg sm:text-xl font-semibold text-slate-900">
+                      {trip.title}
+                    </h1>
+                    <Button
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => {
+                        setTitleDraft(trip.title);
+                        setTitleEditing(true);
+                      }}
+                    >
+                      タイトルを編集
+                    </Button>
+                  </div>
+                )}
 
-                  <p className="text-xs text-slate-500">{formatDateRange()}</p>
-                </section>
+                <p className="text-xs text-slate-500">{formatDateRange()}</p>
+              </section>
 
-              {/* Divider：タイトルと概要の間 */}
+              {/* Divider */}
               <div className="h-px w-full bg-slate-200/80" />
 
               {/* 概要（フラット） */}
@@ -903,23 +812,27 @@ const handleToggleTaskStatus = async (task: Task) => {
                   </form>
                 ) : (
                   <p className="text-sm text-slate-700 whitespace-pre-wrap">
-                    {trip.description || 'この旅行の概要はまだ入力されていません。'}
+                    {trip.description ||
+                      'この旅行の概要はまだ入力されていません。'}
                   </p>
                 )}
               </section>
 
-              {/* Divider：概要と共有リンクの間 */}
+              {/* Divider */}
               <div className="h-px w-full bg-slate-200/80" />
 
               {/* 共有リンク（フラット） */}
               <section className="space-y-2">
-                <h3 className="text-sm font-semibold text-slate-900">共有リンク</h3>
+                <h3 className="text-sm font-semibold text-slate-900">
+                  共有リンク
+                </h3>
 
                 <div className="flex flex-wrap items-center gap-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-slate-500">共有専用リンク</span>
+                    <span className="text-xs text-slate-500">
+                      共有専用リンク
+                    </span>
 
-                    {/* スイッチ本体 */}
                     <button
                       type="button"
                       role="switch"
@@ -929,7 +842,9 @@ const handleToggleTaskStatus = async (task: Task) => {
                         trip.is_share_public ? 'bg-emerald-500' : 'bg-slate-300'
                       }`}
                     >
-                      <span className="sr-only">共有リンクのオン／オフを切り替え</span>
+                      <span className="sr-only">
+                        共有リンクのオン／オフを切り替え
+                      </span>
                       <span
                         className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
                           trip.is_share_public ? 'translate-x-5' : 'translate-x-1'
@@ -963,23 +878,27 @@ const handleToggleTaskStatus = async (task: Task) => {
                 )}
 
                 {copyMessage && (
-                  <div className="text-[11px] text-blue-600">{copyMessage}</div>
+                  <div className="text-[11px] text-blue-600">
+                    {copyMessage}
+                  </div>
                 )}
 
                 <p className="text-[11px] text-slate-400">
                   共有をオンにすると、この旅行を誰でも閲覧できるURLが発行されます。
-                  （このページからは編集はできません）
+                  （/share/{'{token}'} のページは閲覧専用です）
                 </p>
               </section>
 
-              {/* Divider：共有リンクと割り勘カードの間 */}
+              {/* Divider */}
               <div className="h-px w-full bg-slate-200/80" />
 
-              {/* お金・割り勘（カードのままリッチに） */}
+              {/* お金・割り勘 */}
               <Card className="p-4 space-y-2">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-slate-900">お金・割り勘</h3>
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      お金・割り勘
+                    </h3>
                     <p className="text-xs text-slate-500">
                       誰がいくら立て替えたかを登録して、自動で精算案を作成できます。
                     </p>
@@ -997,7 +916,7 @@ const handleToggleTaskStatus = async (task: Task) => {
             </div>
           )}
 
-          {/* 日程 */}
+          {/* 日程タブ */}
           {activeTab === 'schedule' && (
             <div className="space-y-6">
               <div>
@@ -1125,16 +1044,17 @@ const handleToggleTaskStatus = async (task: Task) => {
             </div>
           )}
 
-          {/* タスク */}
+          {/* タスクタブ */}
           {activeTab === 'tasks' && (
             <div className="space-y-6">
               {/* タスク追加フォーム */}
               <Card className="p-4 space-y-3">
-                <h2 className="text-sm font-semibold text-slate-900">タスクを追加</h2>
+                <h2 className="text-sm font-semibold text-slate-900">
+                  タスクを追加
+                </h2>
 
                 <form onSubmit={handleAddTask} className="space-y-2">
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-                    {/* タスク名 */}
                     <input
                       className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="例：航空券を手配する"
@@ -1142,7 +1062,6 @@ const handleToggleTaskStatus = async (task: Task) => {
                       onChange={(e) => setNewTaskTitle(e.target.value)}
                     />
 
-                    {/* 担当者セレクト＋追加ボタン */}
                     <div className="flex items-center gap-2">
                       <select
                         className="rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
@@ -1179,90 +1098,94 @@ const handleToggleTaskStatus = async (task: Task) => {
 
               {/* タスク一覧 */}
               <Card className="p-4 space-y-3">
-                <h2 className="text-sm font-semibold text-slate-900">タスク一覧</h2>
+                <h2 className="text-sm font-semibold text-slate-900">
+                  タスク一覧
+                </h2>
 
                 {tasks.length === 0 ? (
                   <p className="text-sm text-slate-500">
                     まだタスクが登録されていません。上のフォームから追加してみてください。
                   </p>
                 ) : (
-                 <ul className="space-y-2">
-                  {tasks.map((task) => (
-                    <li
-                      key={task.id}
-                      className={`group flex items-start justify-between gap-3 rounded-2xl border border-slate-100 px-3 py-2 shadow-sm transition-all duration-200 ease-out ${
-                        task.status === 'done'
-                          ? 'bg-slate-50/80 translate-y-[1px] opacity-80'
-                          : 'bg-white'
-                      }`}
-                    >
-                      <div className="flex-1">
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                          {/* 左：チェック＋タイトル */}
-                          <label className="flex items-center gap-3 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 transition-transform duration-150 ease-out group-hover:scale-105"
-                              checked={task.status === 'done'}
-                              onChange={() => handleToggleTaskStatus(task)}
-                              disabled={updatingTaskId === task.id}
-                            />
-                            <span
-                              className={`text-sm transition-all duration-200 ${
-                                task.status === 'done'
-                                  ? 'text-slate-400 line-through'
-                                  : 'text-slate-800'
-                              }`}
-                            >
-                              {task.title}
-                            </span>
-                          </label>
+                  <ul className="space-y-2">
+                    {tasks.map((task) => (
+                      <li
+                        key={task.id}
+                        className={`group flex items-start justify-between gap-3 rounded-2xl border border-slate-100 px-3 py-2 shadow-sm transition-all duration-200 ease-out ${
+                          task.status === 'done'
+                            ? 'bg-slate-50/80 translate-y-[1px] opacity-80'
+                            : 'bg-white'
+                        }`}
+                      >
+                        <div className="flex-1">
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            {/* 左：チェック＋タイトル */}
+                            <label className="flex items-center gap-3 cursor-pointer select-none">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 transition-transform duration-150 ease-out group-hover:scale-105"
+                                checked={task.status === 'done'}
+                                onChange={() => handleToggleTaskStatus(task)}
+                                disabled={updatingTaskId === task.id}
+                              />
+                              <span
+                                className={`text-sm transition-all duration-200 ${
+                                  task.status === 'done'
+                                    ? 'text-slate-400 line-through'
+                                    : 'text-slate-800'
+                                }`}
+                              >
+                                {task.title}
+                              </span>
+                            </label>
 
-                          {/* 右：担当者セレクト */}
-                          <div className="flex items-center gap-2 text-xs text-slate-500 mt-1 sm:mt-0">
-                            <span>担当：</span>
-                            <select
-                              className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-150"
-                              value={task.assignee_name ?? ''}
-                              onChange={(e) =>
-                                handleChangeTaskAssignee(task, e.target.value)
-                              }
-                              disabled={updatingAssigneeId === task.id}
-                            >
-                              <option value="">未定</option>
-                              {members.map((m) => {
-                                const label = memberLabel(m);
-                                return (
-                                  <option key={m.id} value={label}>
-                                    {label}
-                                  </option>
-                                );
-                              })}
-                            </select>
+                            {/* 右：担当 */}
+                            <div className="flex items-center gap-2 text-xs text-slate-500 mt-1 sm:mt-0">
+                              <span>担当：</span>
+                              <select
+                                className="rounded-full border border-slate-300 bg-white px-2.5 py-1 text-xs outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors duration-150"
+                                value={task.assignee_name ?? ''}
+                                onChange={(e) =>
+                                  handleChangeTaskAssignee(
+                                    task,
+                                    e.target.value
+                                  )
+                                }
+                                disabled={updatingAssigneeId === task.id}
+                              >
+                                <option value="">未定</option>
+                                {members.map((m) => {
+                                  const label = memberLabel(m);
+                                  return (
+                                    <option key={m.id} value={label}>
+                                      {label}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      {/* 削除ボタン */}
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="text-[11px] text-slate-400 hover:text-red-500 transition-colors duration-150"
-                        onClick={() => handleDeleteTask(task.id)}
-                        disabled={deletingTaskId === task.id}
-                      >
-                        {deletingTaskId === task.id ? '削除中…' : '削除'}
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
- 
+                        {/* 削除ボタン */}
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          className="text-[11px] text-slate-400 hover:text-red-500 transition-colors duration-150"
+                          onClick={() => handleDeleteTask(task.id)}
+                          disabled={deletingTaskId === task.id}
+                        >
+                          {deletingTaskId === task.id ? '削除中…' : '削除'}
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </Card>
             </div>
           )}
 
-          {/* メモ */}
+          {/* メモタブ */}
           {activeTab === 'notes' && (
             <div className="space-y-6">
               <div>
@@ -1300,12 +1223,15 @@ const handleToggleTaskStatus = async (task: Task) => {
                       >
                         <div className="flex-1 space-y-1">
                           <div className="text-xs text-slate-400">
-                            {new Date(note.created_at).toLocaleString('ja-JP', {
-                              month: '2-digit',
-                              day: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                            {new Date(note.created_at).toLocaleString(
+                              'ja-JP',
+                              {
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              }
+                            )}
                           </div>
                           <div className="text-sm text-slate-800 whitespace-pre-wrap">
                             {note.content}
@@ -1328,10 +1254,10 @@ const handleToggleTaskStatus = async (task: Task) => {
             </div>
           )}
 
-          {/* メンバー */}
+          {/* メンバータブ */}
           {activeTab === 'members' && (
             <div className="space-y-8">
-              {/* 名前だけでメンバーを追加 */}
+              {/* 名前だけ追加 */}
               <div>
                 <h2 className="text-lg font-semibold mb-2">
                   名前だけでメンバーを追加
@@ -1361,42 +1287,7 @@ const handleToggleTaskStatus = async (task: Task) => {
                   </div>
 
                   <p className="text-[11px] text-slate-400">
-                    まだアカウントを持っていない家族や友達も、とりあえず名前だけ登録できます。
-                  </p>
-                </form>
-              </div>
-
-              {/* メールアドレスで既存ユーザーを追加 */}
-              <div>
-                <h2 className="text-sm font-semibold mb-1 text-slate-800">
-                  （任意）メールアドレスで既存ユーザーを追加
-                </h2>
-
-                <form onSubmit={handleInviteMember} className="space-y-2">
-                  <label className="block text-xs font-medium text-slate-700">
-                    メールアドレス
-                  </label>
-
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="email"
-                      className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      placeholder="friend@example.com"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                    />
-                    <Button
-                      type="submit"
-                      size="sm"
-                      className="flex-shrink-0 whitespace-nowrap"
-                      disabled={inviting || !inviteEmail.trim()}
-                    >
-                      {inviting ? '追加中...' : 'メンバーを追加'}
-                    </Button>
-                  </div>
-
-                  <p className="text-[11px] text-slate-400">
-                    相手がこのアプリにログイン済みであれば、この旅行が一覧にも表示されます。
+                    家族や友達の名前を登録しておくと、タスクの担当者として選びやすくなります。
                   </p>
                 </form>
               </div>
@@ -1407,17 +1298,13 @@ const handleToggleTaskStatus = async (task: Task) => {
 
                 {members.length === 0 ? (
                   <p className="text-sm text-slate-500">
-                    まだメンバーがいません。
+                    まだメンバーがいません。上から追加してみてください。
                   </p>
                 ) : (
                   <ul className="space-y-2">
                     {members.map((m) => {
-                      const isOwner = m.role === 'owner';
-                      const isSelf = m.user_id === userId;
                       const displayName =
-                        m.display_name ||
-                        m.profiles?.email ||
-                        (isSelf ? 'あなた' : 'メンバー');
+                        m.display_name || 'メンバー';
 
                       return (
                         <li
@@ -1427,32 +1314,19 @@ const handleToggleTaskStatus = async (task: Task) => {
                           <div>
                             <div className="text-sm text-slate-900">
                               {displayName}
-                              {isSelf && '（自分）'}
                             </div>
-                            {m.profiles?.email && (
-                              <div className="text-xs text-slate-500">
-                                {m.profiles.email}
-                              </div>
-                            )}
                           </div>
                           <div className="flex items-center gap-2">
-                            {isOwner && (
-                              <span className="text-[11px] px-2 py-0.5 rounded-full border border-amber-400 bg-amber-50 text-amber-700">
-                                オーナー
-                              </span>
-                            )}
-                            {!isOwner && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="xs"
-                                className="text-xs text-slate-400 hover:text-red-600"
-                                onClick={() => handleDeleteMember(m)}
-                                disabled={deletingMemberId === m.id}
-                              >
-                                {deletingMemberId === m.id ? '削除中…' : '削除'}
-                              </Button>
-                            )}
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="xs"
+                              className="text-xs text-slate-400 hover:text-red-600"
+                              onClick={() => handleDeleteMember(m)}
+                              disabled={deletingMemberId === m.id}
+                            >
+                              {deletingMemberId === m.id ? '削除中…' : '削除'}
+                            </Button>
                           </div>
                         </li>
                       );
